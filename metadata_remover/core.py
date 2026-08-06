@@ -478,6 +478,9 @@ def _run_soffice_convert(
         cmd = [
             soffice,
             "--headless",
+            "--invisible",
+            "--nologo",
+            "--nofirststartwizard",
             "--norestore",
             "--nolockcheck",
             f"-env:UserInstallation={profile_uri}",
