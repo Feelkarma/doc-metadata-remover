@@ -24,6 +24,16 @@ try:
 except Exception:
     pass
 
+# These optional packages are imported lazily (inside functions), so PyInstaller's
+# static analysis can miss them. List them explicitly so PDF (.pdf) and legacy
+# Office (.doc/.ppt/.xls) support is bundled into the frozen app when installed.
+for _opt in ("olefile", "pikepdf"):
+    try:
+        __import__(_opt)
+        hiddenimports.append(_opt)
+    except Exception:
+        pass
+
 
 a = Analysis(
     ['app.py'],

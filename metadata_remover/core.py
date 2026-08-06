@@ -29,9 +29,13 @@ verbatim.
 Beyond the modern OOXML formats this module also supports:
 
     * Legacy binary Office formats (``.doc``, ``.ppt``, ``.xls``) via a
-      LibreOffice "round-trip": the file is converted to its modern OOXML
-      equivalent, cleaned with the surgical routine above, then converted back
-      to the original legacy format.  This requires LibreOffice to be installed.
+      surgical edit of the OLE2 compound file with :mod:`olefile`.  The two
+      standard document-property streams (``\\x05SummaryInformation`` and
+      ``\\x05DocumentSummaryInformation``) are rewritten as empty property sets
+      of identical length, while every content stream is left byte-for-byte
+      untouched.  No LibreOffice / conversion is involved, so it is instant and
+      never triggers a printer query.  Requires the small, pure-Python
+      ``olefile`` package.
     * PDF files (``.pdf``) via :mod:`pikepdf`: the document-information
       dictionary and the XMP metadata stream are removed while every page and
       all visible content are preserved.  This requires the optional
@@ -43,65 +47,35 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
-import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 # Modern Office Open XML formats — handled with zero dependencies.
 OOXML_EXTENSIONS = (".docx", ".pptx", ".xlsx")
-# Legacy binary Office formats — handled through LibreOffice.
+# Legacy binary Office formats — handled in-place with olefile.
 LEGACY_EXTENSIONS = (".doc", ".ppt", ".xls")
 # PDF — handled through pikepdf.
 PDF_EXTENSIONS = (".pdf",)
 
 SUPPORTED_EXTENSIONS = OOXML_EXTENSIONS + LEGACY_EXTENSIONS + PDF_EXTENSIONS
 
-# Legacy extension -> modern OOXML extension it is converted to internally.
-_LEGACY_TO_OOXML = {".doc": ".docx", ".ppt": ".pptx", ".xls": ".xlsx"}
-# LibreOffice filter tokens for converting legacy -> OOXML.
-_LEGACY_TO_OOXML_FILTER = {
-    ".doc": "docx:MS Word 2007 XML",
-    ".ppt": "pptx:Impress MS PowerPoint 2007 XML",
-    ".xls": "xlsx:Calc MS Excel 2007 XML",
-}
-# LibreOffice filter tokens for converting OOXML back to the legacy format.
-_OOXML_TO_LEGACY_FILTER = {
-    ".doc": "doc:MS Word 97",
-    ".ppt": "ppt:MS PowerPoint 97",
-    ".xls": "xls:MS Excel 97",
-}
-
 
 # ---------------------------------------------------------------------------
 # Capability detection (which optional format engines are available)
 # ---------------------------------------------------------------------------
 
-def find_soffice() -> Optional[str]:
-    """Locate the LibreOffice ``soffice`` executable, or return ``None``."""
-    for name in ("soffice", "libreoffice"):
-        found = shutil.which(name)
-        if found:
-            return found
-    # Common install locations that may not be on PATH (mainly Windows/macOS).
-    candidates = [
-        r"C:\Program Files\LibreOffice\program\soffice.exe",
-        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        "/usr/bin/soffice",
-        "/usr/local/bin/soffice",
-    ]
-    for cand in candidates:
-        if os.path.isfile(cand):
-            return cand
-    return None
+def legacy_support_available() -> bool:
+    """True if the optional ``olefile`` package is importable.
 
-
-def libreoffice_available() -> bool:
-    """True if LibreOffice is installed (needed for .doc/.ppt/.xls)."""
-    return find_soffice() is not None
+    ``olefile`` is a tiny, pure-Python library used to strip metadata from
+    legacy ``.doc`` / ``.ppt`` / ``.xls`` files in place.
+    """
+    try:
+        import olefile  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 def pdf_support_available() -> bool:
@@ -117,7 +91,7 @@ def capabilities() -> Dict[str, bool]:
     """Return a map of which format families can currently be processed."""
     return {
         "ooxml": True,  # always available (pure standard library)
-        "legacy": libreoffice_available(),
+        "legacy": legacy_support_available(),
         "pdf": pdf_support_available(),
     }
 
@@ -265,8 +239,8 @@ def clean_document(
     Supported formats:
         * ``.docx`` / ``.pptx`` / ``.xlsx`` -> surgical ZIP/XML cleaning
           (no external tools required).
-        * ``.doc`` / ``.ppt`` / ``.xls``    -> LibreOffice round-trip
-          (requires LibreOffice to be installed).
+        * ``.doc`` / ``.ppt`` / ``.xls``    -> in-place OLE metadata strip
+          (requires the ``olefile`` package; no LibreOffice needed).
         * ``.pdf``                          -> pikepdf metadata strip
           (requires the ``pikepdf`` package).
 
@@ -299,15 +273,14 @@ def clean_document(
         )
 
     # Capability gating for the optional engines.
-    if ext in LEGACY_EXTENSIONS and not libreoffice_available():
+    if ext in LEGACY_EXTENSIONS and not legacy_support_available():
         return CleanResult(
             input_path=input_path,
             output_path="",
             success=False,
             error=(
-                "LibreOffice is required to clean legacy .doc/.ppt/.xls files "
-                "but was not found. Install it from https://www.libreoffice.org "
-                "and try again."
+                "Cleaning legacy .doc/.ppt/.xls files requires the 'olefile' "
+                "package. Install it with: pip install olefile"
             ),
         )
     if ext in PDF_EXTENSIONS and not pdf_support_available():
@@ -460,139 +433,104 @@ def _clean_ooxml(input_path: str, output_path: str) -> Tuple[List[str], List[str
 
 
 # ---------------------------------------------------------------------------
-# Engine 2: legacy Office (.doc/.ppt/.xls) — LibreOffice round-trip
+# Engine 2: legacy Office (.doc/.ppt/.xls) — in-place OLE metadata strip
 # ---------------------------------------------------------------------------
+#
+# Legacy 97-2003 files are OLE2 compound files. Their document metadata lives in
+# two standard property-set streams at the root of the container:
+#     \x05SummaryInformation          title, subject, author, keywords,
+#                                      comments, template, last-saved-by,
+#                                      revision number, application name,
+#                                      create/last-saved timestamps ...
+#     \x05DocumentSummaryInformation  category, company, manager, and any
+#                                      user-defined custom properties ...
+# We rewrite each of those streams in place with a valid but EMPTY property set
+# (property count = 0) padded to the original byte length, so all the document's
+# real content streams stay byte-for-byte identical. No external program
+# (LibreOffice) is used, so there is no printer query and no conversion delay.
 
-# A registrymodifications.xcu that disables every printer-related lookup so a
-# headless conversion never blocks on the system/default printer:
-#   * Save/Document/LoadPrinter        -> "Load printer settings with the
-#                                          document" (unchecked)
-#   * Common/Print/.../ReduceTransparency etc. are left default; we only touch
-#     the setting that triggers the printer query.
-_NO_PRINTER_XCU = (
-    '<?xml version="1.0" encoding="UTF-8"?>\n'
-    '<oor:items '
-    'xmlns:oor="http://openoffice.org/2001/registry" '
-    'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
-    'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
-    ' <item oor:path="/org.openoffice.Office.Common/Save/Document">'
-    '<prop oor:name="LoadPrinter" oor:op="fuse"><value>false</value></prop>'
-    '</item>\n'
-    '</oor:items>\n'
-)
+_OLE_METADATA_STREAMS = ("\x05SummaryInformation", "\x05DocumentSummaryInformation")
 
 
-def _write_no_printer_profile(profile_dir: str) -> None:
-    """Seed a throwaway LibreOffice profile so it never queries a printer.
+def _empty_property_set(original: bytes) -> bytes:
+    """Return a valid OLE property-set blob holding ZERO properties.
 
-    Writes ``user/registrymodifications.xcu`` with
-    ``Save/Document/LoadPrinter = false`` into ``profile_dir``. LibreOffice
-    reads this on startup, so the "connecting to printer" hang is avoided
-    without changing any of the user's system settings. Failures here are
-    non-fatal — conversion is simply attempted without the tweak.
+    The result is padded with null bytes to exactly ``len(original)`` so it can
+    be written back into the stream in place (``olefile`` requires the new data
+    to match the existing stream size). The byte-order mark, version, system
+    identifier, CLSID and the format ID(s) are copied from the original header
+    so the stream stays structurally valid; only the property *values* are
+    dropped by setting each section's property count to 0.
     """
-    try:
-        user_dir = os.path.join(profile_dir, "user")
-        os.makedirs(user_dir, exist_ok=True)
-        with open(
-            os.path.join(user_dir, "registrymodifications.xcu"),
-            "w",
-            encoding="utf-8",
-        ) as fh:
-            fh.write(_NO_PRINTER_XCU)
-    except OSError:  # pragma: no cover - best-effort tweak
-        pass
+    import struct
 
+    size = len(original)
+    if size < 48:  # too small to be a real property set — just zero it out
+        return b"\x00" * size
 
-def _run_soffice_convert(
-    soffice: str, input_path: str, out_dir: str, convert_to: str
-) -> None:
-    """Run a single headless LibreOffice conversion.
+    bom, ver, sysid = struct.unpack_from("<HHI", original, 0)
+    clsid = original[8:24]
+    num_sets = struct.unpack_from("<I", original, 24)[0]
+    if num_sets not in (1, 2):
+        num_sets = 1
+    fmtids = [original[28 + i * 20: 28 + i * 20 + 16] for i in range(num_sets)]
 
-    Uses a throwaway user-profile directory so runs are isolated and never
-    collide with a desktop LibreOffice session. Raises ``RuntimeError`` if the
-    expected output file is not produced.
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    with tempfile.TemporaryDirectory() as profile:
-        profile_uri = Path(profile).as_uri()
-        # Pre-seed the throwaway profile so LibreOffice never touches the
-        # system/default printer. On Windows especially, LibreOffice queries
-        # the default printer for layout metrics when it loads a document, and
-        # if that printer is a network/offline device it blocks for minutes
-        # behind a "connecting to printer" dialog. Disabling "Load printer
-        # settings with the document" (LoadPrinter=false) stops that query.
-        _write_no_printer_profile(profile)
-        cmd = [
-            soffice,
-            "--headless",
-            "--invisible",
-            "--nodefault",
-            "--nologo",
-            "--nofirststartwizard",
-            "--norestore",
-            "--nolockcheck",
-            f"-env:UserInstallation={profile_uri}",
-            "--convert-to",
-            convert_to,
-            "--outdir",
-            out_dir,
-            input_path,
-        ]
-        env = dict(os.environ)
-        # Harmless on Windows; on Unix it stops LibreOffice from probing CUPS
-        # for a spooler when none is needed for a file conversion.
-        env.setdefault("SAL_DISABLE_CUPS", "1")
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=180, env=env
-        )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "LibreOffice conversion failed: "
-            + (proc.stderr.strip() or proc.stdout.strip() or "unknown error")
-        )
+    header = (
+        struct.pack("<HHI", bom, ver, sysid) + clsid + struct.pack("<I", num_sets)
+    )
+    first_section_offset = 28 + num_sets * 20
+    set_table = b""
+    body = b""
+    cursor = first_section_offset
+    for i in range(num_sets):
+        set_table += fmtids[i] + struct.pack("<I", cursor)
+        body += struct.pack("<II", 8, 0)  # section size = 8, property count = 0
+        cursor += 8
+
+    blob = header + set_table + body
+    if len(blob) > size:  # pragma: no cover - defensive
+        blob = blob[:size]
+    else:
+        blob += b"\x00" * (size - len(blob))
+    return blob
 
 
 def _clean_legacy(input_path: str, output_path: str) -> Tuple[List[str], List[str]]:
-    """Clean a legacy .doc/.ppt/.xls file via a LibreOffice round-trip.
+    """Strip document-property metadata from a legacy .doc/.ppt/.xls file.
 
-    The file is converted to its modern OOXML equivalent, surgically cleaned,
-    then converted back to the original legacy format so the output keeps the
-    same extension the user started with. Returns ``(removed_parts, cleaned)``.
+    Works directly on the OLE2 compound file with ``olefile``: the two standard
+    metadata streams are rewritten as empty property sets while every content
+    stream is preserved byte-for-byte. No LibreOffice / conversion is involved.
+    Returns ``(removed_parts, cleaned_parts)``.
     """
-    soffice = find_soffice()
-    if not soffice:  # pragma: no cover - guarded by caller
-        raise RuntimeError("LibreOffice not found.")
+    import olefile
 
-    ext = os.path.splitext(input_path)[1].lower()
-    ooxml_ext = _LEGACY_TO_OOXML[ext]
-    base = os.path.splitext(os.path.basename(input_path))[0]
+    # Work on a copy so the original is never touched and a failure can't leave
+    # a half-written file at the destination.
+    shutil.copy2(input_path, output_path)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        # 1. legacy -> OOXML
-        _run_soffice_convert(soffice, input_path, tmp, _LEGACY_TO_OOXML_FILTER[ext])
-        ooxml_path = os.path.join(tmp, base + ooxml_ext)
-        if not os.path.isfile(ooxml_path):
-            raise RuntimeError("LibreOffice did not produce the expected OOXML file.")
+    try:
+        ole = olefile.OleFileIO(output_path, write_mode=True)
+    except Exception as exc:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        raise RuntimeError(
+            "Not a valid legacy Office file (could not read its structure)."
+        ) from exc
 
-        # 2. Surgically clean the OOXML copy.
-        cleaned_ooxml = os.path.join(tmp, base + "_cleaned" + ooxml_ext)
-        removed, cleaned = _clean_ooxml(ooxml_path, cleaned_ooxml)
+    removed: List[str] = []
+    try:
+        for stream in _OLE_METADATA_STREAMS:
+            if ole.exists(stream):
+                original = ole.openstream(stream).read()
+                ole.write_stream(stream, _empty_property_set(original))
+                removed.append(stream.lstrip("\x05"))
+    finally:
+        ole.close()
 
-        # 3. cleaned OOXML -> back to the original legacy format.
-        final_dir = os.path.join(tmp, "final")
-        _run_soffice_convert(
-            soffice, cleaned_ooxml, final_dir, _OOXML_TO_LEGACY_FILTER[ext]
-        )
-        final_legacy = os.path.join(final_dir, base + "_cleaned" + ext)
-        if not os.path.isfile(final_legacy):
-            raise RuntimeError("LibreOffice did not produce the cleaned legacy file.")
-
-        shutil.move(final_legacy, output_path)
-
-    # Describe the work in user-friendly terms.
-    removed_desc = ["document properties (via LibreOffice)"] + removed
-    return removed_desc, cleaned
+    if not removed:
+        return ["no metadata streams found (file was already clean)"], []
+    return ["document properties: " + ", ".join(removed)], []
 
 
 # ---------------------------------------------------------------------------

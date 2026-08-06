@@ -18,9 +18,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from metadata_remover import (  # noqa: E402
     clean_document,
-    libreoffice_available,
+    legacy_support_available,
     pdf_support_available,
 )
+
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+_OLE_META_STREAMS = ("\x05SummaryInformation", "\x05DocumentSummaryInformation")
 
 docx = pytest.importorskip("docx")
 pptx = pytest.importorskip("pptx")
@@ -149,40 +152,59 @@ def test_pdf_metadata_removed_and_content_preserved(tmp_path):
         out.close()
 
 
+legacy = pytest.importorskip("olefile")
+
+
+def _ole_streams(path):
+    """Return {stream_name: bytes} for every stream in an OLE2 file."""
+    import olefile
+
+    out = {}
+    ole = olefile.OleFileIO(path)
+    try:
+        for entry in ole.listdir():
+            name = "/".join(entry)
+            out[name] = ole.openstream(entry).read()
+    finally:
+        ole.close()
+    return out
+
+
 @pytest.mark.skipif(
-    not libreoffice_available(), reason="LibreOffice not installed"
+    not legacy_support_available(), reason="olefile not installed"
 )
-def test_legacy_doc_metadata_removed_and_content_preserved(tmp_path):
-    from docx import Document
+@pytest.mark.parametrize("fixture", ["sample.doc", "sample.ppt", "sample.xls"])
+def test_legacy_metadata_removed_and_content_preserved(tmp_path, fixture):
+    import olefile
 
-    from metadata_remover.core import find_soffice, _run_soffice_convert
+    src = os.path.join(FIXTURES, fixture)
+    assert os.path.exists(src), f"missing fixture {fixture}"
 
-    soffice = find_soffice()
-    assert soffice, "LibreOffice reported available but soffice not found"
-
-    # Build a modern .docx with metadata, then convert it to legacy .doc.
-    modern = tmp_path / "seed.docx"
-    d = Document()
-    d.add_paragraph("Legacy body text.")
-    d.core_properties.author = "Legacy Secret Author"
-    d.save(str(modern))
-
-    _run_soffice_convert(soffice, str(modern), str(tmp_path), "doc:MS Word 97")
-    legacy = tmp_path / "seed.doc"
-    assert legacy.exists(), "LibreOffice failed to produce the .doc"
-
-    result = clean_document(str(legacy), output_dir=str(tmp_path))
+    result = clean_document(src, output_dir=str(tmp_path))
     assert result.success, result.error
-    assert result.output_path.lower().endswith(".doc")
-    assert os.path.exists(str(legacy))  # original preserved
+    assert result.output_path.lower().endswith(os.path.splitext(fixture)[1])
+    assert os.path.exists(src)  # original preserved
 
-    # Convert the cleaned .doc back to text and confirm secrets are gone but
-    # the body survives.
-    _run_soffice_convert(soffice, result.output_path, str(tmp_path), "txt:Text")
-    txt = os.path.splitext(result.output_path)[0] + ".txt"
-    text = open(txt, encoding="utf-8", errors="ignore").read()
-    assert "Legacy body text." in text
-    assert "Legacy Secret Author" not in text
+    # Metadata must be gone from the standard property streams.
+    ole = olefile.OleFileIO(result.output_path)
+    try:
+        meta = ole.get_metadata()
+        assert meta.author in (None, b"", b"\x00")
+        assert meta.title in (None, b"", b"\x00")
+        assert meta.last_saved_by in (None, b"", b"\x00")
+    finally:
+        ole.close()
+
+    # Every NON-metadata stream must be byte-for-byte identical (content and
+    # formatting preserved); the two metadata streams keep their size but change.
+    before = _ole_streams(src)
+    after = _ole_streams(result.output_path)
+    assert set(before) == set(after)
+    for name in before:
+        if name in _OLE_META_STREAMS:
+            assert len(before[name]) == len(after[name])  # same size, blanked
+        else:
+            assert before[name] == after[name], f"content stream {name} changed"
 
 
 def test_original_never_overwritten(tmp_path):

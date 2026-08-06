@@ -3,7 +3,7 @@
 Strip metadata from documents without altering visible content or formatting:
 
     * Modern Office (DOCX, PPTX, XLSX) via direct ZIP/XML manipulation.
-    * Legacy Office (DOC, PPT, XLS) via a LibreOffice round-trip.
+    * Legacy Office (DOC, PPT, XLS) via an in-place OLE metadata strip (olefile).
     * PDF via pikepdf.
 """
 
@@ -16,11 +16,11 @@ from .core import (
     capabilities,
     clean_document,
     clean_documents,
-    libreoffice_available,
+    legacy_support_available,
     pdf_support_available,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __all__ = [
     "clean_document",
     "clean_documents",
@@ -30,6 +30,6 @@ __all__ = [
     "LEGACY_EXTENSIONS",
     "PDF_EXTENSIONS",
     "capabilities",
-    "libreoffice_available",
+    "legacy_support_available",
     "pdf_support_available",
 ]

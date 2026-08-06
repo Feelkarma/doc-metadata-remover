@@ -7,13 +7,13 @@ tkinterdnd2>=0.3.0
 # Optional: only needed to build a standalone executable.
 pyinstaller>=6.0
 
-# Optional: enables PDF metadata removal (.pdf). If not installed, the app
-# still runs and cleans everything else — PDFs are simply reported as
+# Optional: enables cleaning legacy binary Office files (.doc, .ppt, .xls).
+# Tiny, pure-Python, no external programs required. If not installed, the app
+# still runs and cleans everything else — legacy files are simply reported as
 # unsupported until this is installed.
-pikepdf>=8.0
+olefile>=0.46
 
-# NOTE: Legacy binary Office formats (.doc, .ppt, .xls) are cleaned by round-
-# tripping through LibreOffice, which is an EXTERNAL program (not a pip
-# package). Install LibreOffice separately from https://www.libreoffice.org/
-# if you need to clean these older formats. Modern formats and PDFs do not
-# need it.
+# Optional: enables PDF metadata removal (.pdf). If not installed, the app
+# still runs and cleans everything else — PDFs are reported as unsupported
+# until this is installed.
+pikepdf>=8.0

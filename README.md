@@ -7,9 +7,10 @@ visible content or formatting.
 
 For modern Office files it works by editing the Office Open XML package directly
 (the file *is* a ZIP archive): only the metadata parts are rewritten or removed,
-and every content part is copied through verbatim — **no Microsoft Office and no
-LibreOffice required**. Legacy binary formats and PDFs are handled by two
-optional helpers (LibreOffice and `pikepdf`); see
+and every content part is copied through verbatim. Legacy binary formats are
+cleaned the same surgical way — directly inside the file — using the tiny
+pure-Python `olefile` package, and PDFs use `pikepdf`. **No Microsoft Office and
+no LibreOffice are required for any format.** See
 [Supported formats](#supported-formats).
 
 When you start the app, a short **welcome dialog** explains in plain language
@@ -37,9 +38,9 @@ what the tool does and which formats are currently available on your computer.
   document looks or reads changes
 - 🖱️ **Modern tkinter GUI** — drag-and-drop, file picker, batch processing,
   progress bar, live log, and optional output-folder selection
-- 🗂️ **Legacy formats too** — `.doc`, `.ppt` and `.xls` are cleaned by
-  round-tripping through LibreOffice (if it is installed) and are saved back in
-  their original format
+- 🗂️ **Legacy formats too** — `.doc`, `.ppt` and `.xls` are cleaned in place
+  with `olefile` (the standard document-property streams are wiped) and saved
+  back in their original format — instantly, with no external programs
 - 📄 **PDF support** — document info and XMP metadata are stripped with
   `pikepdf` (if it is installed) while pages and content are preserved
 - 👋 **Plain-language welcome dialog** on startup that explains how the app
@@ -59,18 +60,19 @@ what the tool does and which formats are currently available on your computer.
 | Word         | `.docx` | Built-in (ZIP/XML) | None | core/app/custom props, comments, tracked-change identity |
 | PowerPoint   | `.pptx` | Built-in (ZIP/XML) | None | core/app/custom props, comments |
 | Excel        | `.xlsx` | Built-in (ZIP/XML) | None | core/app/custom props, comments/threaded comments |
-| Word (legacy)       | `.doc` | LibreOffice round-trip | LibreOffice installed | converted to `.docx`, cleaned, converted back |
-| PowerPoint (legacy) | `.ppt` | LibreOffice round-trip | LibreOffice installed | converted to `.pptx`, cleaned, converted back |
-| Excel (legacy)      | `.xls` | LibreOffice round-trip | LibreOffice installed | converted to `.xlsx`, cleaned, converted back |
+| Word (legacy)       | `.doc` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes the document-property streams; content untouched |
+| PowerPoint (legacy) | `.ppt` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes the document-property streams; content untouched |
+| Excel (legacy)      | `.xls` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes the document-property streams; content untouched |
 | PDF          | `.pdf` | `pikepdf` | `pip install pikepdf` | strips document info + XMP metadata; pages/content preserved |
 
-**Why the legacy path is different.** Old `.doc` / `.ppt` / `.xls` files are not
-ZIP/XML packages, so they can't be edited in place. The app hands them to
-LibreOffice, converts them to the modern equivalent, cleans that with the
-built-in surgical cleaner, then converts the clean result back to the original
-format. This requires **LibreOffice** to be installed (a free, separate
-download). If LibreOffice isn't found, modern formats and PDFs still work — only
-legacy files are reported as unavailable.
+**How the legacy path works now.** Old `.doc` / `.ppt` / `.xls` files aren't
+ZIP/XML packages — they are OLE2 "compound" files. Their metadata lives in two
+standard streams (`\x05SummaryInformation` and `\x05DocumentSummaryInformation`),
+which the app rewrites as empty in place, leaving every content stream
+byte-for-byte identical. This uses the tiny pure-Python **`olefile`** package —
+**no LibreOffice, no conversion, and no printer prompts** — so it's instant. If
+`olefile` isn't installed, everything else still works and legacy files are
+reported as unavailable.
 
 **PDFs** need the `pikepdf` package (`pip install pikepdf`). If it isn't
 installed, everything else still works and PDFs are reported as unavailable.
@@ -98,13 +100,12 @@ extras enable more:
 
 - `tkinterdnd2` — drag-and-drop onto the GUI window
 - `pyinstaller` — building a standalone EXE
+- `olefile` — cleaning legacy `.doc` / `.ppt` / `.xls` files (tiny, pure-Python)
 - `pikepdf` — PDF metadata removal
-- **LibreOffice** (a separate program, not a pip package) — cleaning legacy
-  `.doc` / `.ppt` / `.xls` files. Download it from
-  [libreoffice.org](https://www.libreoffice.org/).
 
-Whatever you don't install simply shows up as "unavailable" in the welcome
-dialog; everything else keeps working.
+All optional extras are ordinary `pip` packages — **no separate programs such
+as LibreOffice are needed**. Whatever you don't install simply shows up as
+"unavailable" in the welcome dialog; everything else keeps working.
 
 ---
 
@@ -207,17 +208,25 @@ are guaranteed to be unchanged.
 
 ### Legacy `.doc` / `.ppt` / `.xls`
 
-These older files are binary, not ZIP/XML, so they can't be edited in place.
-The app:
+These older files are OLE2 *compound files* (a little filesystem-in-a-file), not
+ZIP/XML packages. Their document-property metadata lives in two standard
+streams:
 
-1. Asks LibreOffice to convert the file to its modern equivalent
-   (`.doc → .docx`, `.ppt → .pptx`, `.xls → .xlsx`).
-2. Runs the same surgical XML cleaner described above on that copy.
-3. Asks LibreOffice to convert the cleaned copy back to the original format.
+```
+\x05SummaryInformation          ← title, subject, author, keywords, comments,
+                                  last-saved-by, revision number, app name, dates
+\x05DocumentSummaryInformation  ← category, company, manager, custom properties
+```
 
-The cleaned file keeps its original extension. (LibreOffice's *same-format*
-conversion preserves metadata, which is exactly why the round-trip through the
-modern format is required.)
+Using the pure-Python [`olefile`](https://pypi.org/project/olefile/) package,
+the app rewrites each of those two streams **in place** with a valid but empty
+property set (padded to the exact original length, so the file layout is
+unchanged). Every other stream — the actual document content and formatting —
+is left byte-for-byte identical.
+
+Because it edits the file directly, there is **no conversion, no LibreOffice,
+and no printer prompt** — cleaning is instant and the file keeps its original
+extension.
 
 ### PDF
 

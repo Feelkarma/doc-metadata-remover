@@ -326,16 +326,19 @@ class MetadataRemoverApp:
              "It removes that hidden information and saves a clean copy. Your "
              "original file is never changed, and the visible content and "
              "formatting stay exactly the same."),
-            ("\u2699\ufe0f  How it does it (two methods)",
-             "\u2022 Modern files (.docx, .pptx, .xlsx): cleaned instantly and "
-             "precisely \u2014 no other software needed.\n"
-             "\u2022 Older files (.doc, .ppt, .xls) and PDFs: cleaned with a bit "
-             "of help from LibreOffice (for the old formats) and a PDF engine. "
-             "These keep their original format."),
+            ("\u2699\ufe0f  How it does it",
+             "\u2022 Modern files (.docx, .pptx, .xlsx): the hidden metadata "
+             "parts are edited out directly.\n"
+             "\u2022 Older files (.doc, .ppt, .xls): the hidden property "
+             "sections are wiped out in place.\n"
+             "\u2022 PDFs (.pdf): the document info and hidden metadata are "
+             "removed.\n"
+             "Every file keeps its original format \u2014 and it's all instant, "
+             "with no other programs involved."),
             ("\U0001F5A5\ufe0f  What's ready on this computer",
              f"\u2022 Modern Office (.docx/.pptx/.xlsx): always available\n"
              f"\u2022 Legacy Office (.doc/.ppt/.xls): {status(caps['legacy'])} "
-             f"(needs LibreOffice)\n"
+             f"(needs the olefile package)\n"
              f"\u2022 PDF (.pdf): {status(caps['pdf'])} (needs the pikepdf package)"),
             ("\u2705  How to use it",
              "1. Add files (drag & drop or the \u201cAdd files\u201d button).\n"
