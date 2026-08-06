@@ -463,6 +463,47 @@ def _clean_ooxml(input_path: str, output_path: str) -> Tuple[List[str], List[str
 # Engine 2: legacy Office (.doc/.ppt/.xls) — LibreOffice round-trip
 # ---------------------------------------------------------------------------
 
+# A registrymodifications.xcu that disables every printer-related lookup so a
+# headless conversion never blocks on the system/default printer:
+#   * Save/Document/LoadPrinter        -> "Load printer settings with the
+#                                          document" (unchecked)
+#   * Common/Print/.../ReduceTransparency etc. are left default; we only touch
+#     the setting that triggers the printer query.
+_NO_PRINTER_XCU = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<oor:items '
+    'xmlns:oor="http://openoffice.org/2001/registry" '
+    'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+    'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+    ' <item oor:path="/org.openoffice.Office.Common/Save/Document">'
+    '<prop oor:name="LoadPrinter" oor:op="fuse"><value>false</value></prop>'
+    '</item>\n'
+    '</oor:items>\n'
+)
+
+
+def _write_no_printer_profile(profile_dir: str) -> None:
+    """Seed a throwaway LibreOffice profile so it never queries a printer.
+
+    Writes ``user/registrymodifications.xcu`` with
+    ``Save/Document/LoadPrinter = false`` into ``profile_dir``. LibreOffice
+    reads this on startup, so the "connecting to printer" hang is avoided
+    without changing any of the user's system settings. Failures here are
+    non-fatal — conversion is simply attempted without the tweak.
+    """
+    try:
+        user_dir = os.path.join(profile_dir, "user")
+        os.makedirs(user_dir, exist_ok=True)
+        with open(
+            os.path.join(user_dir, "registrymodifications.xcu"),
+            "w",
+            encoding="utf-8",
+        ) as fh:
+            fh.write(_NO_PRINTER_XCU)
+    except OSError:  # pragma: no cover - best-effort tweak
+        pass
+
+
 def _run_soffice_convert(
     soffice: str, input_path: str, out_dir: str, convert_to: str
 ) -> None:
@@ -475,10 +516,18 @@ def _run_soffice_convert(
     os.makedirs(out_dir, exist_ok=True)
     with tempfile.TemporaryDirectory() as profile:
         profile_uri = Path(profile).as_uri()
+        # Pre-seed the throwaway profile so LibreOffice never touches the
+        # system/default printer. On Windows especially, LibreOffice queries
+        # the default printer for layout metrics when it loads a document, and
+        # if that printer is a network/offline device it blocks for minutes
+        # behind a "connecting to printer" dialog. Disabling "Load printer
+        # settings with the document" (LoadPrinter=false) stops that query.
+        _write_no_printer_profile(profile)
         cmd = [
             soffice,
             "--headless",
             "--invisible",
+            "--nodefault",
             "--nologo",
             "--nofirststartwizard",
             "--norestore",
@@ -490,8 +539,12 @@ def _run_soffice_convert(
             out_dir,
             input_path,
         ]
+        env = dict(os.environ)
+        # Harmless on Windows; on Unix it stops LibreOffice from probing CUPS
+        # for a spooler when none is needed for a file conversion.
+        env.setdefault("SAL_DISABLE_CUPS", "1")
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=180
+            cmd, capture_output=True, text=True, timeout=180, env=env
         )
     if proc.returncode != 0:
         raise RuntimeError(
