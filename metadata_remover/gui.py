@@ -36,13 +36,15 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Colour palette (clean, modern light theme)
 # ---------------------------------------------------------------------------
-BG = "#f4f6fb"
+BG = "#eef1f8"
 CARD = "#ffffff"
+HEADER = "#1b2540"
+HEADER_SUB = "#9aa7c7"
 ACCENT = "#3b6ef5"
 ACCENT_DARK = "#2f58c8"
 TEXT = "#1f2430"
 MUTED = "#6b7280"
-BORDER = "#dfe3ec"
+BORDER = "#e2e6f0"
 OK = "#1a7f37"
 ERR = "#c0362c"
 
@@ -58,8 +60,8 @@ class MetadataRemoverApp:
         self._worker: Optional[threading.Thread] = None
 
         root.title("Doc Metadata Remover")
-        root.geometry("720x680")
-        root.minsize(620, 600)
+        root.geometry("760x720")
+        root.minsize(680, 640)
         root.configure(bg=BG)
 
         self._build_styles()
@@ -76,20 +78,22 @@ class MetadataRemoverApp:
 
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=CARD)
+        style.configure("Header.TFrame", background=HEADER)
+        style.configure("Bottom.TFrame", background=CARD)
         style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
         style.configure("Card.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 18, "bold"))
-        style.configure("Sub.TLabel", background=BG, foreground=MUTED, font=("Segoe UI", 10))
+        style.configure("Title.TLabel", background=HEADER, foreground="#ffffff", font=("Segoe UI", 20, "bold"))
+        style.configure("Sub.TLabel", background=HEADER, foreground=HEADER_SUB, font=("Segoe UI", 10))
         style.configure("Muted.TLabel", background=CARD, foreground=MUTED, font=("Segoe UI", 9))
 
         style.configure(
             "Accent.TButton",
             background=ACCENT,
             foreground="#ffffff",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 11, "bold"),
             borderwidth=0,
             focusthickness=0,
-            padding=(16, 9),
+            padding=(22, 12),
         )
         style.map(
             "Accent.TButton",
@@ -115,22 +119,76 @@ class MetadataRemoverApp:
 
     # -- UI layout ----------------------------------------------------------
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, style="TFrame")
-        outer.pack(fill="both", expand=True, padx=20, pady=18)
-
-        ttk.Label(outer, text="Doc Metadata Remover", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(
-            outer,
+        # === Header bar (full-width, dark) =================================
+        header = tk.Frame(self.root, bg=HEADER)
+        header.pack(side="top", fill="x")
+        header_inner = tk.Frame(header, bg=HEADER)
+        header_inner.pack(fill="x", padx=24, pady=18)
+        tk.Label(
+            header_inner,
+            text="\U0001F512  Doc Metadata Remover",
+            bg=HEADER,
+            fg="#ffffff",
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            header_inner,
             text="Strip author, dates, comments & hidden properties from DOCX, "
             "PPTX and XLSX \u2014 content stays untouched.",
-            style="Sub.TLabel",
-            wraplength=680,
+            bg=HEADER,
+            fg=HEADER_SUB,
+            font=("Segoe UI", 10),
+            wraplength=700,
             justify="left",
-        ).pack(anchor="w", pady=(2, 14))
+        ).pack(anchor="w", pady=(4, 0))
+
+        # === Bottom zone (packed FIRST so it is ALWAYS visible) ============
+        # Holds progress bar, log and the action row so none of them can ever
+        # be pushed off-screen, regardless of window height.
+        bottom = tk.Frame(self.root, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        bottom.pack(side="bottom", fill="x")
+
+        bottom_inner = tk.Frame(bottom, bg=CARD)
+        bottom_inner.pack(fill="x", padx=24, pady=(14, 16))
+
+        # Progress bar.
+        self.progress = ttk.Progressbar(bottom_inner, style="Bar.Horizontal.TProgressbar", maximum=100)
+        self.progress.pack(fill="x", pady=(0, 8))
+
+        # Live log.
+        self.log = tk.Text(
+            bottom_inner,
+            height=4,
+            bg="#0f1524",
+            fg="#d5dcec",
+            insertbackground="#d5dcec",
+            font=("Consolas", 9),
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            state="disabled",
+            wrap="word",
+        )
+        self.log.pack(fill="x", expand=False, pady=(0, 12))
+        self.log.tag_configure("ok", foreground="#79e08a")
+        self.log.tag_configure("err", foreground="#ff8a80")
+        self.log.tag_configure("info", foreground="#9db4ff")
+
+        # Action row.
+        action = tk.Frame(bottom_inner, bg=CARD)
+        action.pack(fill="x")
+        self.run_btn = ttk.Button(action, text="\u2728  Remove metadata", style="Accent.TButton", command=self.run)
+        self.run_btn.pack(side="right")
+        self.status_label = tk.Label(action, text="Ready", bg=CARD, fg=MUTED, font=("Segoe UI", 10))
+        self.status_label.pack(side="left")
+
+        # === Middle content area (expands to fill remaining space) =========
+        outer = ttk.Frame(self.root, style="TFrame")
+        outer.pack(side="top", fill="both", expand=True, padx=24, pady=18)
 
         # Drop zone card.
         drop = tk.Frame(outer, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
-        drop.pack(fill="both", expand=False, ipady=6)
+        drop.pack(fill="x", expand=False, ipady=8)
         self.drop_zone = drop
 
         hint = "Drag & drop files here" if _DND_AVAILABLE else "Add files to get started"
@@ -139,8 +197,8 @@ class MetadataRemoverApp:
             text=f"\U0001F4C4  {hint}",
             bg=CARD,
             fg=MUTED,
-            font=("Segoe UI", 12),
-            pady=18,
+            font=("Segoe UI", 13),
+            pady=16,
         )
         self.drop_label.pack(fill="x")
 
@@ -154,17 +212,25 @@ class MetadataRemoverApp:
                 w.drop_target_register(DND_FILES)
                 w.dnd_bind("<<Drop>>", self._on_drop)
 
+        # Output folder row.
+        out_row = tk.Frame(outer, bg=BG)
+        out_row.pack(fill="x", pady=(14, 0))
+        self.output_var = tk.StringVar(value="Output: same folder as each file")
+        ttk.Button(out_row, text="Output folder\u2026", style="Ghost.TButton", command=self.choose_output).pack(side="left")
+        ttk.Button(out_row, text="Reset", style="Ghost.TButton", command=self.reset_output).pack(side="left", padx=(8, 0))
+        tk.Label(out_row, textvariable=self.output_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=12)
+
         # File list card.
         list_card = tk.Frame(outer, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
         list_card.pack(fill="both", expand=True, pady=(14, 0))
 
         head = tk.Frame(list_card, bg=CARD)
-        head.pack(fill="x", padx=12, pady=(10, 4))
+        head.pack(fill="x", padx=14, pady=(12, 6))
         self.count_label = tk.Label(head, text="No files selected", bg=CARD, fg=TEXT, font=("Segoe UI", 10, "bold"))
         self.count_label.pack(side="left")
 
         list_wrap = tk.Frame(list_card, bg=CARD)
-        list_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        list_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 12))
         scroll = tk.Scrollbar(list_wrap)
         scroll.pack(side="right", fill="y")
         self.listbox = tk.Listbox(
@@ -182,44 +248,6 @@ class MetadataRemoverApp:
         )
         self.listbox.pack(side="left", fill="both", expand=True)
         scroll.config(command=self.listbox.yview)
-
-        # Output folder row.
-        out_row = tk.Frame(outer, bg=BG)
-        out_row.pack(fill="x", pady=(14, 6))
-        self.output_var = tk.StringVar(value="Output: same folder as each file")
-        ttk.Button(out_row, text="Output folder\u2026", style="Ghost.TButton", command=self.choose_output).pack(side="left")
-        ttk.Button(out_row, text="Reset", style="Ghost.TButton", command=self.reset_output).pack(side="left", padx=(8, 0))
-        tk.Label(out_row, textvariable=self.output_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=12)
-
-        # Progress + log.
-        self.progress = ttk.Progressbar(outer, style="Bar.Horizontal.TProgressbar", maximum=100)
-        self.progress.pack(fill="x", pady=(8, 4))
-
-        self.log = tk.Text(
-            outer,
-            height=4,
-            bg="#0f1524",
-            fg="#d5dcec",
-            insertbackground="#d5dcec",
-            font=("Consolas", 9),
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=BORDER,
-            state="disabled",
-            wrap="word",
-        )
-        self.log.pack(fill="both", expand=False, pady=(4, 8))
-        self.log.tag_configure("ok", foreground="#79e08a")
-        self.log.tag_configure("err", foreground="#ff8a80")
-        self.log.tag_configure("info", foreground="#9db4ff")
-
-        # Action row.
-        action = tk.Frame(outer, bg=BG)
-        action.pack(fill="x")
-        self.run_btn = ttk.Button(action, text="Remove metadata", style="Accent.TButton", command=self.run)
-        self.run_btn.pack(side="right")
-        self.status_label = tk.Label(action, text="Ready", bg=BG, fg=MUTED, font=("Segoe UI", 9))
-        self.status_label.pack(side="left")
 
     # -- file management ----------------------------------------------------
     def _add_paths(self, paths: List[str]) -> None:
