@@ -1,0 +1,8 @@
+# Core functionality uses ONLY the Python standard library (zipfile, xml, re,
+# tkinter) — no third-party packages are required to run the app.
+
+# Optional: enables drag-and-drop of files onto the GUI window.
+tkinterdnd2>=0.3.0
+
+# Optional: only needed to build a standalone executable.
+pyinstaller>=6.0
