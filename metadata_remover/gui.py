@@ -58,8 +58,8 @@ class MetadataRemoverApp:
         self._worker: Optional[threading.Thread] = None
 
         root.title("Doc Metadata Remover")
-        root.geometry("720x620")
-        root.minsize(620, 560)
+        root.geometry("720x680")
+        root.minsize(620, 600)
         root.configure(bg=BG)
 
         self._build_styles()
@@ -197,7 +197,7 @@ class MetadataRemoverApp:
 
         self.log = tk.Text(
             outer,
-            height=6,
+            height=4,
             bg="#0f1524",
             fg="#d5dcec",
             insertbackground="#d5dcec",
