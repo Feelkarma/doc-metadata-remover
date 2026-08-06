@@ -16,7 +16,11 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from metadata_remover import clean_document  # noqa: E402
+from metadata_remover import (  # noqa: E402
+    clean_document,
+    libreoffice_available,
+    pdf_support_available,
+)
 
 docx = pytest.importorskip("docx")
 pptx = pytest.importorskip("pptx")
@@ -115,6 +119,70 @@ def test_unsupported_extension(tmp_path):
     result = clean_document(str(src), output_dir=str(tmp_path))
     assert not result.success
     assert "Unsupported" in (result.error or "")
+
+
+@pytest.mark.skipif(not pdf_support_available(), reason="pikepdf not installed")
+def test_pdf_metadata_removed_and_content_preserved(tmp_path):
+    import pikepdf
+
+    src = tmp_path / "in.pdf"
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    with pdf.open_metadata() as meta:
+        meta["dc:creator"] = ["Secret PDF Author"]
+        meta["dc:title"] = "Secret PDF Title"
+    pdf.docinfo["/Author"] = "Secret PDF Author"
+    pdf.docinfo["/Title"] = "Secret PDF Title"
+    pdf.save(str(src))
+    pdf.close()
+
+    result = clean_document(str(src), output_dir=str(tmp_path))
+    assert result.success, result.error
+    assert os.path.exists(str(src))  # original preserved
+
+    out = pikepdf.open(result.output_path)
+    try:
+        assert len(out.pages) == 1  # content preserved
+        assert len(out.docinfo) == 0  # doc info stripped
+        assert "/Metadata" not in out.Root  # XMP stream removed
+    finally:
+        out.close()
+
+
+@pytest.mark.skipif(
+    not libreoffice_available(), reason="LibreOffice not installed"
+)
+def test_legacy_doc_metadata_removed_and_content_preserved(tmp_path):
+    from docx import Document
+
+    from metadata_remover.core import find_soffice, _run_soffice_convert
+
+    soffice = find_soffice()
+    assert soffice, "LibreOffice reported available but soffice not found"
+
+    # Build a modern .docx with metadata, then convert it to legacy .doc.
+    modern = tmp_path / "seed.docx"
+    d = Document()
+    d.add_paragraph("Legacy body text.")
+    d.core_properties.author = "Legacy Secret Author"
+    d.save(str(modern))
+
+    _run_soffice_convert(soffice, str(modern), str(tmp_path), "doc:MS Word 97")
+    legacy = tmp_path / "seed.doc"
+    assert legacy.exists(), "LibreOffice failed to produce the .doc"
+
+    result = clean_document(str(legacy), output_dir=str(tmp_path))
+    assert result.success, result.error
+    assert result.output_path.lower().endswith(".doc")
+    assert os.path.exists(str(legacy))  # original preserved
+
+    # Convert the cleaned .doc back to text and confirm secrets are gone but
+    # the body survives.
+    _run_soffice_convert(soffice, result.output_path, str(tmp_path), "txt:Text")
+    txt = os.path.splitext(result.output_path)[0] + ".txt"
+    text = open(txt, encoding="utf-8", errors="ignore").read()
+    assert "Legacy body text." in text
+    assert "Legacy Secret Author" not in text
 
 
 def test_original_never_overwritten(tmp_path):

@@ -1,13 +1,19 @@
 # Doc Metadata Remover
 
 A lightweight, cross-platform desktop app that **strips metadata from Office
-documents** — `.docx`, `.pptx`, and `.xlsx` — without touching a single byte of
-their visible content or formatting.
+documents and PDFs** — modern `.docx` / `.pptx` / `.xlsx`, legacy
+`.doc` / `.ppt` / `.xls`, and `.pdf` — without touching a single byte of their
+visible content or formatting.
 
-It works by editing the Office Open XML package directly (the file *is* a ZIP
-archive): only the metadata parts are rewritten or removed, and every content
-part is copied through verbatim. **No Microsoft Office and no LibreOffice
-required.**
+For modern Office files it works by editing the Office Open XML package directly
+(the file *is* a ZIP archive): only the metadata parts are rewritten or removed,
+and every content part is copied through verbatim — **no Microsoft Office and no
+LibreOffice required**. Legacy binary formats and PDFs are handled by two
+optional helpers (LibreOffice and `pikepdf`); see
+[Supported formats](#supported-formats).
+
+When you start the app, a short **welcome dialog** explains in plain language
+what the tool does and which formats are currently available on your computer.
 
 ---
 
@@ -31,23 +37,43 @@ required.**
   document looks or reads changes
 - 🖱️ **Modern tkinter GUI** — drag-and-drop, file picker, batch processing,
   progress bar, live log, and optional output-folder selection
+- 🗂️ **Legacy formats too** — `.doc`, `.ppt` and `.xls` are cleaned by
+  round-tripping through LibreOffice (if it is installed) and are saved back in
+  their original format
+- 📄 **PDF support** — document info and XMP metadata are stripped with
+  `pikepdf` (if it is installed) while pages and content are preserved
+- 👋 **Plain-language welcome dialog** on startup that explains how the app
+  works and shows which formats are available (dismissable with a
+  "Don't show this again" option)
 - ⌨️ **Command-line mode** for scripting and automation
 - 📦 **Packageable as a standalone EXE** with PyInstaller
-- 🐍 **Zero required dependencies** — the core and GUI use only the Python
-  standard library
+- 🐍 **Zero required dependencies for modern Office files** — that path uses only
+  the Python standard library; legacy formats and PDFs use optional helpers
 
 ---
 
 ## Supported formats
 
-| Format | Extension | Notes                                   |
-| ------ | --------- | --------------------------------------- |
-| Word         | `.docx` | core/app/custom props, comments, tracked-change identity |
-| PowerPoint   | `.pptx` | core/app/custom props, comments         |
-| Excel        | `.xlsx` | core/app/custom props, comments/threaded comments |
+| Format | Extension | Handler | Requirement | Notes |
+| ------ | --------- | ------- | ----------- | ----- |
+| Word         | `.docx` | Built-in (ZIP/XML) | None | core/app/custom props, comments, tracked-change identity |
+| PowerPoint   | `.pptx` | Built-in (ZIP/XML) | None | core/app/custom props, comments |
+| Excel        | `.xlsx` | Built-in (ZIP/XML) | None | core/app/custom props, comments/threaded comments |
+| Word (legacy)       | `.doc` | LibreOffice round-trip | LibreOffice installed | converted to `.docx`, cleaned, converted back |
+| PowerPoint (legacy) | `.ppt` | LibreOffice round-trip | LibreOffice installed | converted to `.pptx`, cleaned, converted back |
+| Excel (legacy)      | `.xls` | LibreOffice round-trip | LibreOffice installed | converted to `.xlsx`, cleaned, converted back |
+| PDF          | `.pdf` | `pikepdf` | `pip install pikepdf` | strips document info + XMP metadata; pages/content preserved |
 
-> Legacy binary formats (`.doc`, `.ppt`, `.xls`) are **not** supported — they
-> are not ZIP/XML based. Save them as the modern format first.
+**Why the legacy path is different.** Old `.doc` / `.ppt` / `.xls` files are not
+ZIP/XML packages, so they can't be edited in place. The app hands them to
+LibreOffice, converts them to the modern equivalent, cleans that with the
+built-in surgical cleaner, then converts the clean result back to the original
+format. This requires **LibreOffice** to be installed (a free, separate
+download). If LibreOffice isn't found, modern formats and PDFs still work — only
+legacy files are reported as unavailable.
+
+**PDFs** need the `pikepdf` package (`pip install pikepdf`). If it isn't
+installed, everything else still works and PDFs are reported as unavailable.
 
 ---
 
@@ -67,9 +93,18 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-The app runs with **no third-party packages** — `pip install` is only needed
-for the optional drag-and-drop feature (`tkinterdnd2`) and for building an EXE
-(`pyinstaller`).
+Cleaning **modern** Office files needs **no third-party packages**. The optional
+extras enable more:
+
+- `tkinterdnd2` — drag-and-drop onto the GUI window
+- `pyinstaller` — building a standalone EXE
+- `pikepdf` — PDF metadata removal
+- **LibreOffice** (a separate program, not a pip package) — cleaning legacy
+  `.doc` / `.ppt` / `.xls` files. Download it from
+  [libreoffice.org](https://www.libreoffice.org/).
+
+Whatever you don't install simply shows up as "unavailable" in the welcome
+dialog; everything else keeps working.
 
 ---
 
@@ -169,6 +204,26 @@ Doc Metadata Remover:
 
 Because only metadata parts are modified, the document's content and formatting
 are guaranteed to be unchanged.
+
+### Legacy `.doc` / `.ppt` / `.xls`
+
+These older files are binary, not ZIP/XML, so they can't be edited in place.
+The app:
+
+1. Asks LibreOffice to convert the file to its modern equivalent
+   (`.doc → .docx`, `.ppt → .pptx`, `.xls → .xlsx`).
+2. Runs the same surgical XML cleaner described above on that copy.
+3. Asks LibreOffice to convert the cleaned copy back to the original format.
+
+The cleaned file keeps its original extension. (LibreOffice's *same-format*
+conversion preserves metadata, which is exactly why the round-trip through the
+modern format is required.)
+
+### PDF
+
+PDF metadata lives in two places: the document-info dictionary and an XMP
+metadata stream. Using `pikepdf`, the app deletes both and re-saves the file.
+Pages, text and layout are left untouched.
 
 ---
 

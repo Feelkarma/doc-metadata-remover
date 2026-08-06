@@ -15,6 +15,7 @@ it up on a background thread so the interface stays responsive.
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
@@ -22,7 +23,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
 
-from .core import SUPPORTED_EXTENSIONS, clean_document
+from .core import (
+    SUPPORTED_EXTENSIONS,
+    capabilities,
+    clean_document,
+)
+
+# Small config file used to remember the "don't show intro again" choice.
+_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".doc_metadata_remover.json")
 
 # Optional drag-and-drop support.
 try:  # pragma: no cover - depends on optional dependency
@@ -67,6 +75,10 @@ class MetadataRemoverApp:
         self._build_styles()
         self._build_ui()
         self._poll_queue()
+
+        # Show the "how it works" dialog on startup (unless disabled).
+        if not self._intro_disabled():
+            self.root.after(250, self._show_intro_dialog)
 
     # -- styling ------------------------------------------------------------
     def _build_styles(self) -> None:
@@ -133,8 +145,9 @@ class MetadataRemoverApp:
         ).pack(anchor="w")
         tk.Label(
             header_inner,
-            text="Strip author, dates, comments & hidden properties from DOCX, "
-            "PPTX and XLSX \u2014 content stays untouched.",
+            text="Strip author, dates, comments & hidden properties from Word, "
+            "PowerPoint, Excel (modern & legacy) and PDF \u2014 content stays "
+            "untouched.",
             bg=HEADER,
             fg=HEADER_SUB,
             font=("Segoe UI", 10),
@@ -249,6 +262,132 @@ class MetadataRemoverApp:
         self.listbox.pack(side="left", fill="both", expand=True)
         scroll.config(command=self.listbox.yview)
 
+    # -- intro / help dialog ------------------------------------------------
+    @staticmethod
+    def _load_config() -> dict:
+        try:
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _save_config(cfg: dict) -> None:
+        try:
+            with open(_CONFIG_PATH, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh)
+        except Exception:
+            pass
+
+    def _intro_disabled(self) -> bool:
+        return bool(self._load_config().get("hide_intro", False))
+
+    def _show_intro_dialog(self) -> None:
+        """A friendly, plain-language explanation of how the app works."""
+        caps = capabilities()
+
+        def status(ok: bool) -> str:
+            return "available" if ok else "not installed"
+
+        win = tk.Toplevel(self.root)
+        win.title("How this app works")
+        win.configure(bg=CARD)
+        win.resizable(False, False)
+        win.transient(self.root)
+
+        # Header strip.
+        head = tk.Frame(win, bg=HEADER)
+        head.pack(fill="x")
+        tk.Label(
+            head,
+            text="\U0001F512  How this app works",
+            bg=HEADER,
+            fg="#ffffff",
+            font=("Segoe UI", 15, "bold"),
+        ).pack(anchor="w", padx=22, pady=(16, 4))
+        tk.Label(
+            head,
+            text="A quick 30-second guide \u2014 in plain English.",
+            bg=HEADER,
+            fg=HEADER_SUB,
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", padx=22, pady=(0, 16))
+
+        body = tk.Frame(win, bg=CARD)
+        body.pack(fill="both", expand=True, padx=22, pady=(16, 6))
+
+        sections = [
+            ("\U0001F4C4  What is metadata?",
+             "Hidden information saved inside your files \u2014 things like the "
+             "author's name, your company, when the file was created or edited, "
+             "comments and tracked-change history. You can't see it in the page, "
+             "but anyone who receives the file can."),
+            ("\u2702\ufe0f  What this app does",
+             "It removes that hidden information and saves a clean copy. Your "
+             "original file is never changed, and the visible content and "
+             "formatting stay exactly the same."),
+            ("\u2699\ufe0f  How it does it (two methods)",
+             "\u2022 Modern files (.docx, .pptx, .xlsx): cleaned instantly and "
+             "precisely \u2014 no other software needed.\n"
+             "\u2022 Older files (.doc, .ppt, .xls) and PDFs: cleaned with a bit "
+             "of help from LibreOffice (for the old formats) and a PDF engine. "
+             "These keep their original format."),
+            ("\U0001F5A5\ufe0f  What's ready on this computer",
+             f"\u2022 Modern Office (.docx/.pptx/.xlsx): always available\n"
+             f"\u2022 Legacy Office (.doc/.ppt/.xls): {status(caps['legacy'])} "
+             f"(needs LibreOffice)\n"
+             f"\u2022 PDF (.pdf): {status(caps['pdf'])} (needs the pikepdf package)"),
+            ("\u2705  How to use it",
+             "1. Add files (drag & drop or the \u201cAdd files\u201d button).\n"
+             "2. Optionally pick an output folder.\n"
+             "3. Click \u201cRemove metadata\u201d. Clean copies are saved with a "
+             "\u201c_clean\u201d name next to the originals."),
+        ]
+        for title, text in sections:
+            tk.Label(
+                body, text=title, bg=CARD, fg=TEXT,
+                font=("Segoe UI", 11, "bold"), justify="left", anchor="w",
+            ).pack(fill="x", pady=(8, 2))
+            tk.Label(
+                body, text=text, bg=CARD, fg=MUTED,
+                font=("Segoe UI", 10), justify="left", anchor="w",
+                wraplength=560,
+            ).pack(fill="x")
+
+        # Footer with "don't show again" + close button.
+        footer = tk.Frame(win, bg=CARD)
+        footer.pack(fill="x", padx=22, pady=(10, 18))
+
+        hide_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            footer,
+            text="Don't show this again",
+            variable=hide_var,
+            bg=CARD, fg=MUTED, font=("Segoe UI", 9),
+            activebackground=CARD, selectcolor=CARD,
+            highlightthickness=0, borderwidth=0,
+        ).pack(side="left")
+
+        def close() -> None:
+            if hide_var.get():
+                cfg = self._load_config()
+                cfg["hide_intro"] = True
+                self._save_config(cfg)
+            win.destroy()
+
+        ttk.Button(footer, text="Got it", style="Accent.TButton", command=close).pack(side="right")
+
+        win.protocol("WM_DELETE_WINDOW", close)
+        # Centre over the main window.
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() - win.winfo_width()) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - win.winfo_height()) // 2
+            win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        except Exception:
+            pass
+        win.grab_set()
+
     # -- file management ----------------------------------------------------
     def _add_paths(self, paths: List[str]) -> None:
         added = 0
@@ -267,12 +406,15 @@ class MetadataRemoverApp:
 
     def add_files(self) -> None:
         paths = filedialog.askopenfilenames(
-            title="Select Office documents",
+            title="Select documents",
             filetypes=[
-                ("Office documents", "*.docx *.pptx *.xlsx"),
-                ("Word", "*.docx"),
-                ("PowerPoint", "*.pptx"),
-                ("Excel", "*.xlsx"),
+                ("All supported", "*.docx *.pptx *.xlsx *.doc *.ppt *.xls *.pdf"),
+                ("Modern Office", "*.docx *.pptx *.xlsx"),
+                ("Legacy Office", "*.doc *.ppt *.xls"),
+                ("PDF", "*.pdf"),
+                ("Word", "*.docx *.doc"),
+                ("PowerPoint", "*.pptx *.ppt"),
+                ("Excel", "*.xlsx *.xls"),
                 ("All files", "*.*"),
             ],
         )

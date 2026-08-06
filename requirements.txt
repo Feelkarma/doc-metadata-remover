@@ -1,8 +1,19 @@
-# Core functionality uses ONLY the Python standard library (zipfile, xml, re,
-# tkinter) — no third-party packages are required to run the app.
+# Cleaning modern Office files (.docx, .pptx, .xlsx) uses ONLY the Python
+# standard library (zipfile, xml, re, tkinter) — no third-party packages needed.
 
 # Optional: enables drag-and-drop of files onto the GUI window.
 tkinterdnd2>=0.3.0
 
 # Optional: only needed to build a standalone executable.
 pyinstaller>=6.0
+
+# Optional: enables PDF metadata removal (.pdf). If not installed, the app
+# still runs and cleans everything else — PDFs are simply reported as
+# unsupported until this is installed.
+pikepdf>=8.0
+
+# NOTE: Legacy binary Office formats (.doc, .ppt, .xls) are cleaned by round-
+# tripping through LibreOffice, which is an EXTERNAL program (not a pip
+# package). Install LibreOffice separately from https://www.libreoffice.org/
+# if you need to clean these older formats. Modern formats and PDFs do not
+# need it.
