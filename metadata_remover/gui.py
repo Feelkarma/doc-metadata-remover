@@ -466,6 +466,7 @@ class MetadataRemoverApp:
     def _work(self, files: List[str], out_dir: Optional[str]) -> None:
         total = len(files)
         ok = 0
+        dependency_errors = set()
         for i, path in enumerate(files, start=1):
             result = clean_document(path, output_dir=out_dir)
             if result.success:
@@ -473,7 +474,13 @@ class MetadataRemoverApp:
                 self._queue.put(("log", f"\u2713 {os.path.basename(path)}  \u2192  {os.path.basename(result.output_path)}", "ok"))
             else:
                 self._queue.put(("log", f"\u2717 {os.path.basename(path)}  \u2014  {result.error}", "err"))
+                # Detect missing dependency errors and collect them.
+                if result.error and "require" in result.error and "package" in result.error:
+                    dependency_errors.add(result.error)
             self._queue.put(("progress", (i / total) * 100, None))
+        # Show dependency error dialog(s) if any were encountered.
+        for err in dependency_errors:
+            self._queue.put(("dependency_error", err, None))
         self._queue.put(("done", (ok, total), None))
 
     def _poll_queue(self) -> None:
@@ -484,6 +491,8 @@ class MetadataRemoverApp:
                     self._log(payload, tag or "info")
                 elif kind == "progress":
                     self.progress["value"] = payload
+                elif kind == "dependency_error":
+                    messagebox.showerror("Missing Dependency", payload)
                 elif kind == "done":
                     ok, total = payload
                     self.run_btn.config(state="normal")
