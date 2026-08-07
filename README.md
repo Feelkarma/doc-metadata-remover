@@ -40,8 +40,11 @@ what the tool does and which formats are currently available on your computer.
 - 🎯 **Content-safe** — content parts (`document.xml`, slides, worksheets,
   formulas, images, styles) are copied byte-for-byte, so nothing about how the
   document looks or reads changes
-- 🖱️ **Modern tkinter GUI** — drag-and-drop, file picker, batch processing,
-  progress bar, live log, and optional output-folder selection
+- 🖱️ **Polished dark "privacy-vault" GUI** — a custom-drawn tkinter interface
+  (rounded cards, a dashed drop zone, file-type chips, a glowing progress bar
+  and vector icons) with drag-and-drop, file picker, batch processing, a
+  collapsible activity log, and optional output-folder selection. Built with
+  **no extra runtime dependencies** — everything is rendered on a canvas
 - 🗂️ **Legacy formats too** — `.doc`, `.ppt` and `.xls` are cleaned in place
   with `olefile` (the standard document-property streams are wiped) and saved
   back in their original format — instantly, with no external programs
