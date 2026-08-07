@@ -102,10 +102,10 @@ class MetadataRemoverApp:
             "Accent.TButton",
             background=ACCENT,
             foreground="#ffffff",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 10, "bold"),
             borderwidth=0,
             focusthickness=0,
-            padding=(22, 12),
+            padding=(18, 9),
         )
         style.map(
             "Accent.TButton",
@@ -114,12 +114,12 @@ class MetadataRemoverApp:
         style.configure(
             "Ghost.TButton",
             background=CARD,
-            foreground=TEXT,
-            font=("Segoe UI", 10),
+            foreground=MUTED,
+            font=("Segoe UI", 9),
             borderwidth=1,
-            padding=(14, 8),
+            padding=(10, 5),
         )
-        style.map("Ghost.TButton", background=[("active", "#eef1f8")])
+        style.map("Ghost.TButton", background=[("active", "#f5f7fa")], foreground=[("active", TEXT)])
 
         style.configure(
             "Bar.Horizontal.TProgressbar",
@@ -199,39 +199,30 @@ class MetadataRemoverApp:
         outer = ttk.Frame(self.root, style="TFrame")
         outer.pack(side="top", fill="both", expand=True, padx=24, pady=18)
 
-        # Drop zone card.
+        # Drop zone card - compact design.
         drop = tk.Frame(outer, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
-        drop.pack(fill="x", expand=False, ipady=8)
+        drop.pack(fill="x", expand=False)
         self.drop_zone = drop
 
-        hint = "Drag & drop files here" if _DND_AVAILABLE else "Add files to get started"
+        drop_inner = tk.Frame(drop, bg=CARD)
+        drop_inner.pack(fill="x", padx=16, pady=12)
+
+        hint = "Drag & drop files here, or" if _DND_AVAILABLE else "Click to add files"
         self.drop_label = tk.Label(
-            drop,
+            drop_inner,
             text=f"\U0001F4C4  {hint}",
             bg=CARD,
             fg=MUTED,
-            font=("Segoe UI", 13),
-            pady=16,
+            font=("Segoe UI", 11),
         )
-        self.drop_label.pack(fill="x")
+        self.drop_label.pack(side="left")
 
-        btn_row = tk.Frame(drop, bg=CARD)
-        btn_row.pack(pady=(0, 14))
-        ttk.Button(btn_row, text="Add files", style="Accent.TButton", command=self.add_files).pack(side="left", padx=6)
-        ttk.Button(btn_row, text="Clear", style="Ghost.TButton", command=self.clear_files).pack(side="left", padx=6)
+        ttk.Button(drop_inner, text="Browse\u2026", style="Accent.TButton", command=self.add_files).pack(side="left", padx=(8, 0))
 
         if _DND_AVAILABLE:
-            for w in (drop, self.drop_label):
+            for w in (drop, drop_inner, self.drop_label):
                 w.drop_target_register(DND_FILES)
                 w.dnd_bind("<<Drop>>", self._on_drop)
-
-        # Output folder row.
-        out_row = tk.Frame(outer, bg=BG)
-        out_row.pack(fill="x", pady=(14, 0))
-        self.output_var = tk.StringVar(value="Output: same folder as each file")
-        ttk.Button(out_row, text="Output folder\u2026", style="Ghost.TButton", command=self.choose_output).pack(side="left")
-        ttk.Button(out_row, text="Reset", style="Ghost.TButton", command=self.reset_output).pack(side="left", padx=(8, 0))
-        tk.Label(out_row, textvariable=self.output_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=12)
 
         # File list card.
         list_card = tk.Frame(outer, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
@@ -242,8 +233,14 @@ class MetadataRemoverApp:
         self.count_label = tk.Label(head, text="No files selected", bg=CARD, fg=TEXT, font=("Segoe UI", 10, "bold"))
         self.count_label.pack(side="left")
 
+        # Buttons for managing the file list.
+        btn_frame = tk.Frame(head, bg=CARD)
+        btn_frame.pack(side="right")
+        ttk.Button(btn_frame, text="Remove", style="Ghost.TButton", command=self.remove_selected).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Clear all", style="Ghost.TButton", command=self.clear_files).pack(side="left", padx=2)
+
         list_wrap = tk.Frame(list_card, bg=CARD)
-        list_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+        list_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 0))
         scroll = tk.Scrollbar(list_wrap)
         scroll.pack(side="right", fill="y")
         self.listbox = tk.Listbox(
@@ -261,6 +258,20 @@ class MetadataRemoverApp:
         )
         self.listbox.pack(side="left", fill="both", expand=True)
         scroll.config(command=self.listbox.yview)
+
+        # Output folder row - compact, at the bottom of list card.
+        out_row = tk.Frame(list_card, bg=CARD)
+        out_row.pack(fill="x", padx=14, pady=(8, 12))
+        tk.Label(out_row, text="Output:", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
+        self.output_var = tk.StringVar(value="same folder as original")
+        tk.Label(out_row, textvariable=self.output_var, bg=CARD, fg=TEXT, font=("Segoe UI", 9)).pack(side="left", padx=(6, 0))
+        ttk.Button(out_row, text="Change\u2026", style="Ghost.TButton", command=self.choose_output).pack(side="right")
+
+        # Keyboard shortcuts.
+        self.root.bind("<Control-o>", lambda e: self.add_files())
+        self.root.bind("<Control-O>", lambda e: self.add_files())
+        self.listbox.bind("<Delete>", lambda e: self.remove_selected())
+        self.listbox.bind("<BackSpace>", lambda e: self.remove_selected())
 
     # -- intro / help dialog ------------------------------------------------
     @staticmethod
@@ -429,6 +440,17 @@ class MetadataRemoverApp:
         self.listbox.delete(0, "end")
         self._refresh_count()
 
+    def remove_selected(self) -> None:
+        """Remove the currently selected files from the list."""
+        selection = self.listbox.curselection()
+        if not selection:
+            return
+        # Remove in reverse order to maintain correct indices.
+        for idx in reversed(selection):
+            self.listbox.delete(idx)
+            del self.files[idx]
+        self._refresh_count()
+
     def _on_drop(self, event) -> None:  # pragma: no cover - GUI event
         # tkinterdnd2 returns a brace-wrapped, space-separated list.
         paths = self.root.tk.splitlist(event.data)
@@ -442,11 +464,13 @@ class MetadataRemoverApp:
         d = filedialog.askdirectory(title="Choose output folder")
         if d:
             self.output_dir = d
-            self.output_var.set(f"Output: {d}")
-
-    def reset_output(self) -> None:
-        self.output_dir = None
-        self.output_var.set("Output: same folder as each file")
+            # Show just the folder name for cleaner display.
+            folder_name = os.path.basename(d) or d
+            self.output_var.set(folder_name)
+        else:
+            # User cancelled - reset to default.
+            self.output_dir = None
+            self.output_var.set("same folder as original")
 
     # -- processing ---------------------------------------------------------
     def run(self) -> None:
