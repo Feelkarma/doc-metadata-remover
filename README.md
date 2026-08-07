@@ -27,9 +27,13 @@ what the tool does and which formats are currently available on your computer.
   - Title, subject, keywords, description, category, content status
   - Application name & version, company, manager (`app.xml`)
   - **Custom properties** (`custom.xml` removed entirely)
-  - **Comments** (Word, PowerPoint and Excel comment parts + references)
+  - **Comment identity** — comments are **kept** (Word, PowerPoint and Excel,
+    classic *and* threaded), but the author name, initials, e-mail, user id and
+    timestamp attached to each one are blanked, so the feedback stays while the
+    person behind it becomes anonymous
   - **Tracked-change identity** — the *who* (`author`) and *when* (`date`) are
-    erased from revision markup while the change itself is left intact
+    erased from revision markup while the change itself is left intact and
+    visible
 - 🔒 **Never overwrites your originals** — output is saved as
   `filename_clean.docx` (a free name is chosen automatically if it already
   exists)
@@ -57,12 +61,12 @@ what the tool does and which formats are currently available on your computer.
 
 | Format | Extension | Handler | Requirement | Notes |
 | ------ | --------- | ------- | ----------- | ----- |
-| Word         | `.docx` | Built-in (ZIP/XML) | None | core/app/custom props, comments, tracked-change identity |
-| PowerPoint   | `.pptx` | Built-in (ZIP/XML) | None | core/app/custom props, comments |
-| Excel        | `.xlsx` | Built-in (ZIP/XML) | None | core/app/custom props, comments/threaded comments |
-| Word (legacy)       | `.doc` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes the document-property streams; content untouched |
-| PowerPoint (legacy) | `.ppt` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes the document-property streams; content untouched |
-| Excel (legacy)      | `.xls` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes the document-property streams; content untouched |
+| Word         | `.docx` | Built-in (ZIP/XML) | None | core/app/custom props; comments & tracked changes kept but anonymised |
+| PowerPoint   | `.pptx` | Built-in (ZIP/XML) | None | core/app/custom props; comments kept but anonymised |
+| Excel        | `.xlsx` | Built-in (ZIP/XML) | None | core/app/custom props; comments/threaded comments kept but anonymised |
+| Word (legacy)       | `.doc` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes document-property streams; in-body comment/revision names not touched |
+| PowerPoint (legacy) | `.ppt` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes document-property streams; in-body comment/revision names not touched |
+| Excel (legacy)      | `.xls` | In-place OLE strip (`olefile`) | `pip install olefile` | wipes document-property streams; in-body comment/revision names not touched |
 | PDF          | `.pdf` | `pikepdf` | `pip install pikepdf` | strips document info + XMP metadata; pages/content preserved |
 
 **How the legacy path works now.** Old `.doc` / `.ppt` / `.xls` files aren't
@@ -196,15 +200,19 @@ Doc Metadata Remover:
 1. Opens the archive in memory.
 2. Replaces `core.xml` with an empty, valid properties part.
 3. Rewrites `app.xml` with identifying fields blanked out.
-4. Deletes `custom.xml` and all comment parts — and also removes their
-   relationship entries (`*.rels`) and content-type overrides
-   (`[Content_Types].xml`) so the package stays valid.
-5. Strips `author` / `date` / `initials` attributes from tracked-change and
-   comment markup in the document body.
-6. Re-zips, preserving the original member order and per-part compression.
+4. Deletes `custom.xml` — and removes its relationship entry (`*.rels`) and
+   content-type override (`[Content_Types].xml`) so the package stays valid.
+5. **Anonymises comments (they are kept, not deleted):** in every comment /
+   author / people part (Word, PowerPoint and Excel, classic *and* threaded) it
+   blanks the author name, initials, e-mail, user id and timestamp while leaving
+   the comment text and its anchor in place.
+6. **Anonymises tracked changes:** strips `author` / `date` / `initials`
+   attributes from revision markup in the document body so the change stays
+   visible but the identity is gone.
+7. Re-zips, preserving the original member order and per-part compression.
 
-Because only metadata parts are modified, the document's content and formatting
-are guaranteed to be unchanged.
+Because only metadata/identity fields are modified, the document's visible
+content and formatting are guaranteed to be unchanged.
 
 ### Legacy `.doc` / `.ppt` / `.xls`
 
@@ -227,6 +235,13 @@ is left byte-for-byte identical.
 Because it edits the file directly, there is **no conversion, no LibreOffice,
 and no printer prompt** — cleaning is instant and the file keeps its original
 extension.
+
+> **Scope note.** For these legacy binary formats the app clears the standard
+> document-property streams (author, company, dates, last-saved-by, etc.).
+> Unlike the modern formats, it does **not** reach into the file body to
+> anonymise names attached to inline comments or tracked changes — the old
+> binary layout makes that risky to edit in place. If you need that, open the
+> file in Word and save it as `.docx` first, then run it through the app.
 
 ### PDF
 

@@ -64,6 +64,64 @@ def test_docx_metadata_removed_and_content_preserved(tmp_path):
     assert out.core_properties.last_modified_by in ("", None)
 
 
+def _build_docx_with_comment(path):
+    """Write a minimal .docx that has a classic comment and a tracked change."""
+    parts = {
+        "[Content_Types].xml":
+            b'<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            b'<Default Extension="xml" ContentType="application/xml"/>'
+            b'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            b'<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>'
+            b'</Types>',
+        "_rels/.rels":
+            b'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+        "word/_rels/document.xml.rels":
+            b'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>',
+        "word/document.xml":
+            b'<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+            b'<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Hello world</w:t></w:r><w:commentRangeEnd w:id="0"/>'
+            b'<w:r><w:commentReference w:id="0"/></w:r></w:p>'
+            b'<w:p><w:ins w:id="1" w:author="Jane Editor" w:date="2020-01-01T00:00:00Z"><w:r><w:t>inserted text</w:t></w:r></w:ins></w:p>'
+            b'</w:body></w:document>',
+        "word/comments.xml":
+            b'<?xml version="1.0"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            b'<w:comment w:id="0" w:author="Secret Reviewer" w:date="2020-01-01T00:00:00Z" w:initials="SR">'
+            b'<w:p><w:r><w:t>This is my comment text</w:t></w:r></w:p></w:comment></w:comments>',
+    }
+    with zipfile.ZipFile(path, "w") as z:
+        for name, blob in parts.items():
+            z.writestr(name, blob)
+
+
+def test_comments_and_tracked_changes_kept_but_anonymized(tmp_path):
+    src = tmp_path / "in.docx"
+    _build_docx_with_comment(str(src))
+
+    result = clean_document(str(src), output_dir=str(tmp_path))
+    assert result.success, result.error
+
+    comments = _read(result.output_path, "word/comments.xml")
+    document = _read(result.output_path, "word/document.xml")
+
+    # The comment part must still exist and keep its text.
+    assert comments is not None, "comment part was removed (should be kept)"
+    assert "This is my comment text" in comments
+    # ...but the reviewer identity must be gone.
+    assert "Secret Reviewer" not in comments
+    assert "SR" not in comments
+    assert "2020" not in comments
+
+    # Tracked change stays visible but the author is anonymised.
+    assert "<w:ins" in document
+    assert "inserted text" in document
+    assert "Jane Editor" not in document
+    # The comment anchor stays so the comment remains attached to the text.
+    assert "commentReference" in document
+
+
 def test_pptx_metadata_removed_and_content_preserved(tmp_path):
     from pptx import Presentation
 

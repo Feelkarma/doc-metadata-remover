@@ -331,17 +331,24 @@ class MetadataRemoverApp:
             ("\U0001F4C4  What is metadata?",
              "Hidden information saved inside your files \u2014 things like the "
              "author's name, your company, when the file was created or edited, "
-             "comments and tracked-change history. You can't see it in the page, "
-             "but anyone who receives the file can."),
+             "and the names attached to comments and tracked changes. Anyone who "
+             "receives the file can dig it out."),
             ("\u2702\ufe0f  What this app does",
              "It removes that hidden information and saves a clean copy. Your "
              "original file is never changed, and the visible content and "
-             "formatting stay exactly the same."),
+             "formatting stay exactly the same.\n"
+             "Comments and tracked changes are kept \u2014 but the names, "
+             "initials and dates attached to them are wiped, so the feedback "
+             "stays while the person behind it becomes anonymous."),
             ("\u2699\ufe0f  How it does it",
-             "\u2022 Modern files (.docx, .pptx, .xlsx): the hidden metadata "
-             "parts are edited out directly.\n"
-             "\u2022 Older files (.doc, .ppt, .xls): the hidden property "
-             "sections are wiped out in place.\n"
+             "\u2022 Modern files (.docx, .pptx, .xlsx): the hidden metadata is "
+             "edited out directly, and names on comments / tracked changes are "
+             "blanked.\n"
+             "\u2022 Older files (.doc, .ppt, .xls): the hidden document "
+             "properties (author, company, dates, etc.) are wiped in place. "
+             "Note: for these older files, names inside comments or tracked "
+             "changes in the body are NOT removed \u2014 save them as the modern "
+             "format (.docx etc.) first if you need that.\n"
              "\u2022 PDFs (.pdf): the document info and hidden metadata are "
              "removed.\n"
              "Every file keeps its original format \u2014 and it's all instant, "

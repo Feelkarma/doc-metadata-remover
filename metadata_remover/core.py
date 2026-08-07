@@ -15,13 +15,17 @@ What gets removed / cleaned:
     * ``docProps/custom.xml`` -> all custom properties (part removed entirely,
                                  together with its relationship and content-type
                                  override).
-    * Comments                -> comment parts removed (Word/PowerPoint/Excel)
-                                 plus their references, relationships and
-                                 content-type overrides.
-    * Tracked changes         -> the identifying ``w:author`` / ``w:date`` /
-                                 ``w:id`` attributes are stripped from revision
-                                 markup so *who* and *when* is erased while the
-                                 document structure stays intact.
+    * Comments                -> comments are *kept* but anonymised: the author
+                                 name, initials, e-mail, user id and timestamp
+                                 are blanked in every comment / author / people
+                                 part (Word/PowerPoint/Excel, classic & threaded)
+                                 while the comment text and anchors stay intact.
+    * Tracked changes         -> revisions are *kept* but anonymised: the
+                                 identifying ``w:author`` / ``w:date`` /
+                                 ``w:initials`` attributes are stripped from the
+                                 revision markup so *who* and *when* is erased
+                                 while the changes stay visible and the document
+                                 structure is preserved.
 
 Only these metadata parts are modified; all other archive members are copied
 verbatim.
@@ -167,35 +171,59 @@ def _remove_content_type_overrides(ct_xml: bytes, part_substrings: List[str]) ->
     return pattern.sub(keep, text).encode("utf-8")
 
 
-def _strip_docx_comment_refs(doc_xml: bytes) -> bytes:
-    """Remove comment range/reference markers from word/document.xml."""
-    text = doc_xml.decode("utf-8")
-    # Self-closing comment markers.
-    text = re.sub(r"<w:commentRangeStart\b[^>]*/>", "", text)
-    text = re.sub(r"<w:commentRangeEnd\b[^>]*/>", "", text)
-    # A run that only carries a comment reference -> drop the whole run.
-    text = re.sub(
-        r"<w:r\b[^>]*>(?:(?!</w:r>).)*?<w:commentReference\b[^>]*/>.*?</w:r>",
-        "",
-        text,
-        flags=re.DOTALL,
-    )
-    # Any stray comment reference left behind.
-    text = re.sub(r"<w:commentReference\b[^>]*/>", "", text)
-    return text.encode("utf-8")
-
-
 def _strip_tracked_change_identity(doc_xml: bytes) -> bytes:
     """Remove author/date/id attributes from tracked-change markup.
 
     This erases *who* made a change and *when*, without accepting or rejecting
-    the change itself, so document content and structure are preserved.
+    the change itself, so document content and structure are preserved.  The
+    revisions themselves stay in the document and remain visible as tracked
+    changes — only the person's identity is blanked.
     """
     text = doc_xml.decode("utf-8")
     text = re.sub(r'\s+w:author="[^"]*"', ' w:author=""', text)
     text = re.sub(r'\s+w:date="[^"]*"', "", text)
     # Anonymise initials used by comments/annotations too.
     text = re.sub(r'\s+w:initials="[^"]*"', "", text)
+    return text.encode("utf-8")
+
+
+# Attributes that carry a person's identity inside comment / author / people
+# parts.  These are blanked (value emptied) so the comment stays intact and
+# anchored while the name/e-mail/user-id disappears.
+_AUTHOR_NAME_ATTRS = (
+    "w:author", "w15:author", "w16cid:author",
+    "author", "name", "displayName", "userId", "email", "userName",
+    "w15:userId", "w15:providerId",
+)
+_AUTHOR_DATE_ATTRS = ("w:date", "date", "dT", "dateTime", "created", "w16du:dateUtc")
+_AUTHOR_INITIALS_ATTRS = ("w:initials", "initials")
+
+
+def _anonymize_comment_authors(xml_bytes: bytes) -> bytes:
+    """Blank out identity fields in a comment / author / people XML part.
+
+    The comment text and structure are kept intact — only the author name,
+    initials, e-mail, user id and timestamp are removed.  This is applied only
+    to comment/author/people parts, so blanking generic attributes such as
+    ``name`` or ``displayName`` is safe here.
+    """
+    text = xml_bytes.decode("utf-8")
+
+    # Blank identity-bearing attributes (keep the attribute, empty its value so
+    # structural references such as ids stay valid).
+    for attr in _AUTHOR_NAME_ATTRS:
+        text = re.sub(
+            rf'({re.escape(attr)})="[^"]*"',
+            r'\1=""',
+            text,
+        )
+    # Remove initials and date attributes entirely.
+    for attr in _AUTHOR_INITIALS_ATTRS + _AUTHOR_DATE_ATTRS:
+        text = re.sub(rf'\s+{re.escape(attr)}="[^"]*"', "", text)
+
+    # Excel legacy comments store the name as element text: <author>Jane</author>.
+    text = re.sub(r"(<author\b[^>]*>)[^<]*(</author>)", r"\1\2", text)
+
     return text.encode("utf-8")
 
 
@@ -357,27 +385,32 @@ def _clean_ooxml(input_path: str, output_path: str) -> Tuple[List[str], List[str
         infos = {info.filename: info for info in zin.infolist()}
         data: Dict[str, bytes] = {name: zin.read(name) for name in names}
 
-    # Identify comment-related parts to drop (Word/PowerPoint/Excel).
-    comment_parts = [
+    # Identify comment / author / people parts (Word/PowerPoint/Excel).  These
+    # are kept in the document but have their author identities blanked, so the
+    # comments and tracked changes remain visible while becoming anonymous.
+    author_parts = [
         n for n in list(data)
         if re.search(
             r"(word/comments.*\.xml$|"
             r"word/(commentsExtended|commentsIds|commentsExtensible)\.xml$|"
+            r"word/people\.xml$|"
             r"ppt/comments/.*\.xml$|"
-            r"ppt/slides/_rels/.*comment.*|"
+            r"ppt/(commentAuthors|authors)\.xml$|"
+            r"ppt/modernComments/.*\.xml$|"
             r"xl/comments.*\.xml$|"
             r"xl/threadedComments/.*\.xml$|"
-            r".*/threadedComments/.*\.xml$)",
+            r"xl/persons/.*\.xml$|"
+            r".*/threadedComments/.*\.xml$|"
+            r".*/persons/.*\.xml$)",
             n,
             re.IGNORECASE,
         )
     ]
 
-    # 1. Drop custom properties + comment parts.
+    # 1. Drop custom properties only (comments are kept, just anonymised).
     drop = set()
     if "docProps/custom.xml" in data:
         drop.add("docProps/custom.xml")
-    drop.update(comment_parts)
 
     for part in sorted(drop):
         data.pop(part, None)
@@ -400,16 +433,25 @@ def _clean_ooxml(input_path: str, output_path: str) -> Tuple[List[str], List[str
             data["[Content_Types].xml"], override_targets
         )
 
-    # 5. Update relationship parts (remove rels to dropped parts).
-    rel_targets = ["custom.xml"] + [os.path.basename(p) for p in comment_parts]
+    # 5. Update relationship parts (remove rels to dropped parts only).
+    rel_targets = ["custom.xml"]
     for rels_name in [n for n in data if n.endswith(".rels")]:
         data[rels_name] = _remove_relationships(data[rels_name], rel_targets)
 
-    # 6. DOCX: strip comment refs + tracked-change identity from document.xml
-    #    and headers/footers.
+    # 6. Anonymise the author identity inside every comment / author / people
+    #    part.  The comments themselves are preserved.
+    for part in author_parts:
+        new_bytes = _anonymize_comment_authors(data[part])
+        if new_bytes != data[part]:
+            data[part] = new_bytes
+            if part not in cleaned_parts:
+                cleaned_parts.append(part)
+
+    # 7. DOCX: anonymise tracked-change identity in document.xml and
+    #    headers/footers/notes.  Comment anchors are left in place so the
+    #    (now anonymous) comments stay attached to the right text.
     for part in [n for n in data if re.match(r"word/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$", n)]:
-        new_bytes = _strip_docx_comment_refs(data[part])
-        new_bytes = _strip_tracked_change_identity(new_bytes)
+        new_bytes = _strip_tracked_change_identity(data[part])
         if new_bytes != data[part]:
             data[part] = new_bytes
             if part not in cleaned_parts:

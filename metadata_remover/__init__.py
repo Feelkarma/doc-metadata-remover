@@ -20,7 +20,7 @@ from .core import (
     pdf_support_available,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __all__ = [
     "clean_document",
     "clean_documents",
